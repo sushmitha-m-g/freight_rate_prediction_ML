@@ -1,10 +1,11 @@
 """
 CatBoost + Extra Trees blend for freight rate prediction.
 
-Steps:
-  1. Tune the blend weight on August (train Jan-Jul, predict Aug).
-  2. Report honest metrics on Sep-Oct (train Jan-Aug, predict Sep-Oct).
-  3. Refit on all of Jan-Oct and write the submission files.
+Split: random 80:20 on train_test.csv.
+  1. Carve a 20% tuning set out of the 80% development portion and
+     choose the blend weight there (the test set is not used).
+  2. Report MAE, RMSE, R2 on the 20% test set.
+  3. Refit on all of train_test.csv and write the submission files.
 
 Run from the repo root:
     python src/train_blend.py
@@ -16,6 +17,7 @@ import pandas as pd
 from catboost import CatBoostRegressor
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
 DATA = Path("data")
 SEED = 42
@@ -104,29 +106,28 @@ def metrics(y_true, y_pred) -> dict:
 
 
 def main():
-    train_all = load(DATA / "train_test.csv")
+    data = load(DATA / "train_test.csv")
 
-    # ---- 1. Tune the blend weight on August ----
-    tune_train = train_all[train_all["date"] < "2025-08-01"]
-    tune_eval = train_all[
-        (train_all["date"] >= "2025-08-01") & (train_all["date"] < "2025-09-01")
-    ]
+    # ---- Split: 80% development / 20% test, random ----
+    dev, test = train_test_split(data, test_size=0.20, random_state=SEED, shuffle=True)
+    print(f"Random 80:20 split: dev={len(dev):,} rows, test={len(test):,} rows")
+
+    # ---- 1. Tune the blend weight on a holdout carved from the dev set ----
+    tune_train, tune_eval = train_test_split(dev, test_size=0.20, random_state=SEED, shuffle=True)
     pred_cat, pred_extra = fit_predict(tune_train, tune_eval)
-    y_aug = tune_eval["posted_rate"].to_numpy()
+    y_tune = tune_eval["posted_rate"].to_numpy()
 
     weights = np.linspace(0.0, 1.0, 21)  # weight on CatBoost
-    maes = [mean_absolute_error(y_aug, w * pred_cat + (1 - w) * pred_extra) for w in weights]
+    maes = [mean_absolute_error(y_tune, w * pred_cat + (1 - w) * pred_extra) for w in weights]
     best_w = float(weights[int(np.argmin(maes))])
-    print(f"[August tuning] best CatBoost weight = {best_w:.2f}")
+    print(f"[Tuning holdout] best CatBoost weight = {best_w:.2f}")
 
-    # ---- 2. Honest evaluation on Sep-Oct ----
-    eval_train = train_all[train_all["date"] < "2025-09-01"]
-    eval_test = train_all[train_all["date"] >= "2025-09-01"]
-    pred_cat, pred_extra = fit_predict(eval_train, eval_test)
-    y_test = eval_test["posted_rate"].to_numpy()
+    # ---- 2. Evaluate on the 20% test set ----
+    pred_cat, pred_extra = fit_predict(dev, test)
+    y_test = test["posted_rate"].to_numpy()
     pred_blend = best_w * pred_cat + (1 - best_w) * pred_extra
 
-    print("\n[Sep-Oct evaluation]")
+    print("\n[Random 80:20 test evaluation]")
     for name, pred in [
         ("CatBoost", pred_cat),
         ("ExtraTrees", pred_extra),
@@ -135,13 +136,13 @@ def main():
         m = metrics(y_test, pred)
         print(f"  {name:<10} MAE={m['MAE']:.2f}  RMSE={m['RMSE']:.2f}  R2={m['R2']:.4f}")
 
-    # ---- 3. Final fit on all of Jan-Oct, predict validation and December ----
+    # ---- 3. Final fit on all of train_test.csv, predict validation and December ----
     validation = load(DATA / "validation.csv")
     december = load(DATA / "december_chart_inputs.csv")
     n_val = len(validation)
 
     to_predict = pd.concat([validation, december], ignore_index=True)
-    pred_cat, pred_extra = fit_predict(train_all, to_predict)
+    pred_cat, pred_extra = fit_predict(data, to_predict)
     final = best_w * pred_cat + (1 - best_w) * pred_extra
 
     # Validation submission: exactly load_id,predicted_rate.
