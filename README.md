@@ -4,20 +4,23 @@ Solution for the Spotter AI Machine Learning Engineer assessment. The model pred
 
 See Freight_Rate_Prediction_Report.pdf (or .docx) for the validation approach, data exploration, model selection and the December prediction chart.
 
-Repository structure
+## Repository structure
+
+```
 freight-rate-prediction/
-├── DATA/                              # provided datasets
+├── data/                       # provided datasets
 │   ├── train_test.csv
 │   ├── validation.csv
 │   ├── validation_predictions_template.csv
 │   └── december_chart_inputs.csv
 ├── src/
-│   └── train_blend.py                 # training, validation and prediction
-├── score.py                           # provided scorer (unmodified)
+│   └── train_blend.py          # training, validation and prediction
+├── score.py                    # provided scorer (unmodified)
 ├── requirements.txt
-├── validation_predictions.csv         # final submission (generated)
+├── validation_predictions.csv  # final submission (generated)
 └── README.md
-Setup
+```
+
 
 Requires Python 3.9 or later.
 
